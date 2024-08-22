@@ -85,11 +85,3 @@ This desktop application provides a simple graphical interface to manage files o
 ## Contributing
 
 If you'd like to contribute to this project, please fork the repository and submit a pull request.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-Replace `path_to_your_screenshot.png` with the actual path or name of your screenshot file. This template should give you a good starting point for your README file!
