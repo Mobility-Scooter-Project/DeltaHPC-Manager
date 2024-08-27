@@ -5,6 +5,7 @@ from paramiko.ssh_exception import SSHException
 import os
 from threading import Thread
 from stat import S_ISDIR
+import time
 
 # Global variables to hold the SSH client, SFTP session, and transport
 client = None
@@ -57,14 +58,15 @@ def connect_to_server():
         sftp = client.open_sftp()
         messagebox.showinfo("Connection", "Successfully connected to the server!")
 
-        # Enable the upload, download, and disconnect buttons after a successful connection
+        # Enable the upload, download, delete, and disconnect buttons after a successful connection
         enable_buttons()
 
+    except paramiko.ssh_exception.AuthenticationException as e:
+        messagebox.showerror("Authentication Error", f"Authentication failed: {str(e)}")
     except paramiko.ssh_exception.SSHException as e:
         messagebox.showerror("Connection Error", f"SSH Error: {str(e)}")
     except Exception as e:
         messagebox.showerror("Connection Error", str(e))
-
 
 def upload_file():
     global sftp
@@ -77,16 +79,13 @@ def upload_file():
         # Open a file dialog to select a file
         file_path = filedialog.askopenfilename()
         if file_path:
-            # Print the selected file path for debugging
-            print(f"Selected file path: {file_path}")
-
             # Check if the file exists locally
             if not os.path.isfile(file_path):
                 messagebox.showerror("Upload Error", "The selected file does not exist.")
                 return
 
             # Default remote directory path
-            default_path = f"/projects/bddu/{username}/data"
+            default_path = f"/projects/bddu/data"
 
             # Ask the user for a subdirectory where the file will be uploaded, appended to the default path
             subdir = simpledialog.askstring("Upload Directory", f"Enter the subdirectory path (relative to {default_path}):")
@@ -96,16 +95,10 @@ def upload_file():
                 remote_dir = default_path
 
             # Ensure the directory exists, create it if it doesn't
-            try:
-                sftp.stat(remote_dir)
-            except FileNotFoundError:
-                make_remote_dir(remote_dir)
+            make_remote_dir(remote_dir)
 
             # Define the remote path where the file will be uploaded
             remote_path = os.path.join(remote_dir, os.path.basename(file_path))
-
-            # Print the remote path for debugging
-            print(f"Remote path: {remote_path}")
 
             # Get file size for progress tracking
             file_size = os.path.getsize(file_path)
@@ -132,7 +125,6 @@ def make_remote_dir(remote_dir):
             except FileNotFoundError:
                 sftp.mkdir(path)
 
-
 def upload_file_thread(file_path, remote_path, file_size):
     try:
         def progress_callback(transferred, total):
@@ -156,10 +148,13 @@ def download_file():
         if sftp is None:
             messagebox.showerror("Download Error", "Not connected to the server.")
             return
-        default_path = f"/projects/bddu/{username}/data"
+        default_path = f"/projects/bddu/data"
         # Ask the user for the remote path of the file to be downloaded
         remote_file = simpledialog.askstring("Remote Path", f"Enter the remote path of the file to download (relative to {default_path}):")
         
+        
+            
+            
             
         if remote_file:
             remote_path = os.path.join(default_path, remote_file)
@@ -183,12 +178,11 @@ def download_file():
     except Exception as e:
         messagebox.showerror("Download Error", str(e))
 
-
 def download_file_thread(remote_path, file_path, file_size):
     try:
         def progress_callback(transferred, total):
             # Calculate the progress percentage
-            progress = (transferred / file_size) * 100
+            progress = (transferred / total) * 100
             # Update the progress on the main thread
             root.after(0, update_progress_bar, progress)
 
@@ -201,16 +195,132 @@ def download_file_thread(remote_path, file_path, file_size):
     except Exception as e:
         messagebox.showerror("Download Error", str(e))
 
+def delete_file_or_folder():
+    global sftp
+    try:
+        # Check if SFTP session is active
+        if sftp is None:
+            messagebox.showerror("Deletion Error", "Not connected to the server.")
+            return
+
+        # Default remote directory path
+        default_path = f"/projects/bddu/data"
+        
+        # Ask the user for the path of the file/folder to be deleted
+        path_to_delete = simpledialog.askstring("Delete Path", f"Enter the remote path of the file/folder to delete (relative to {default_path}):")
+        
+        if path_to_delete:
+            remote_path = os.path.join(default_path, path_to_delete)
+
+            # Check if the remote path exists
+            try:
+                file_stat = sftp.stat(remote_path)
+            except FileNotFoundError:
+                messagebox.showerror("Deletion Error", "The specified file or folder does not exist.")
+                return
+
+            # Ask for user confirmation
+            confirm = messagebox.askyesno("Confirm Deletion", f"Are you sure you want to permanently delete '{remote_path}'?")
+            if not confirm:
+                return  # User canceled the deletion
+
+            # If it's a directory, delete it recursively
+            if S_ISDIR(file_stat.st_mode):
+                delete_directory_recursive(remote_path)
+            else:
+                sftp.remove(remote_path)  # If it's a file, delete it directly
+
+            messagebox.showinfo("Deletion Complete", f"Successfully deleted '{remote_path}'")
+    
+    except Exception as e:
+        messagebox.showerror("Deletion Error", str(e))
+
+def delete_directory_recursive(remote_path):
+    """Recursively delete a directory and all its contents."""
+    for item in sftp.listdir(remote_path):
+        item_path = os.path.join(remote_path, item)
+        try:
+            if is_directory(item_path):
+                delete_directory_recursive(item_path)  # Recursively delete subdirectory
+            else:
+                sftp.remove(item_path)  # Delete file
+        except Exception as e:
+            messagebox.showerror("Deletion Error", f"Error deleting {item_path}: {str(e)}")
+    sftp.rmdir(remote_path)  # Delete the now-empty directory
+
+
+def delete_item_thread(remote_path, item_type, total_size):
+    try:
+        transferred = 0
+
+        if item_type == "folder":
+            for count in delete_folder(remote_path, total_size):
+                transferred += count
+                progress = (transferred / total_size) * 100
+                root.after(0, update_progress_bar, progress)
+        else:
+            delete_file(remote_path, total_size)
+            root.after(0, update_progress_bar, 100)
+
+        messagebox.showinfo("Delete", f"Successfully deleted the {item_type} '{os.path.basename(remote_path)}'")
+        
+        # Reset progress bar and percentage label
+        root.after(0, update_progress_bar, 0)
+    except Exception as e:
+        messagebox.showerror("Delete Error", str(e))
+
+def delete_file(remote_path, file_size):
+    """Delete a single file with progress tracking."""
+    try:
+        # Delete the file
+        sftp.remove(remote_path)
+    except Exception as e:
+        raise e
+
+def delete_folder(remote_path, total_size):
+    """Recursively delete a folder and its contents with progress tracking."""
+    try:
+        for item in sftp.listdir_attr(remote_path):
+            item_path = os.path.join(remote_path, item.filename)
+            if S_ISDIR(item.st_mode):
+                # Recursively delete the subdirectory
+                yield from delete_folder(item_path, total_size)
+            else:
+                # Delete the file
+                sftp.remove(item_path)
+                yield item.st_size
+        # Delete the folder itself
+        sftp.rmdir(remote_path)
+        yield 0  # For the folder itself
+    except Exception as e:
+        raise e
+
+def calculate_directory_size(remote_path):
+    """Calculate total size of all files in the directory recursively."""
+    total_size = 0
+    try:
+        for item in sftp.listdir_attr(remote_path):
+            item_path = os.path.join(remote_path, item.filename)
+            if S_ISDIR(item.st_mode):
+                total_size += calculate_directory_size(item_path)
+            else:
+                total_size += item.st_size
+    except Exception as e:
+        raise e
+    return total_size
+
+def is_directory(remote_path):
+    """Check if the remote path is a directory."""
+    try:
+        return S_ISDIR(sftp.stat(remote_path).st_mode)
+    except IOError:
+        return False
+
 def update_progress_bar(progress):
-    # Update the progress bar value
+    """Update the progress bar and percentage label."""
     progress_var.set(progress)
-    # Update the percentage label
     percentage_label.config(text=f"{progress:.2f}%")
     root.update_idletasks()
-
-
-
-
 
 def manage_folders():
     global sftp
@@ -221,7 +331,7 @@ def manage_folders():
             return
 
         # Default remote directory path
-        default_path = f"/projects/bddu/{username}/data"
+        default_path = f"/projects/bddu/data"
         
         # Ask the user for the subdirectory to manage, appended to the default path
         subdir = simpledialog.askstring("Remote Directory", f"Enter the subdirectory path (relative to {default_path}):")
@@ -230,41 +340,34 @@ def manage_folders():
         else:
             remote_dir = default_path
 
-        # List files and directories in the remote directory
-        file_list = sftp.listdir(remote_dir)
-        
-        # Clear the directory content display area
-        directory_content_display.config(state=tk.NORMAL)  # Enable editing
-        directory_content_display.delete(1.0, tk.END)  # Clear current content
-        
-        # Show the current directory path
-        directory_content_display.insert(tk.END, f"Directory: {remote_dir}\n\n")
+        # Check if the directory exists
+        try:
+            sftp.stat(remote_dir)
+        except FileNotFoundError:
+            messagebox.showerror("Folder Management Error", "The specified directory does not exist.")
+            return
 
-        # Display the files and directories
-        if file_list:
-            for item in file_list:
-                # Check if it's a directory
-                item_path = os.path.join(remote_dir, item)
-                if is_directory(item_path):
-                    directory_content_display.insert(tk.END, f"** {item}\n")  # Prefix directories with **
-                else:
-                    directory_content_display.insert(tk.END, f"{item}\n")  # No prefix for files
-        else:
-            directory_content_display.insert(tk.END, "No files or directories found.")
+        # List directory contents
+        folder_contents = sftp.listdir_attr(remote_dir)
         
-        directory_content_display.config(state=tk.DISABLED)  # Disable editing
+        # Clear the display area before showing updated directory contents
+        directory_display.config(state=tk.NORMAL)
+        directory_display.delete(1.0, tk.END)
+        directory_display.insert(tk.END, f"Contents of {remote_dir}:\n\n")
+        
+        for item in folder_contents:
+            item_name = item.filename
+            item_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(item.st_mtime))
+            item_size = f"{item.st_size} bytes"
+            if S_ISDIR(item.st_mode):
+                directory_display.insert(tk.END, f"[DIR]  {item_name}\t\n")
+            else:
+                directory_display.insert(tk.END, f"[FILE] {item_name}\t\n")
+        
+        directory_display.config(state=tk.DISABLED)
 
     except Exception as e:
         messagebox.showerror("Folder Management Error", str(e))
-
-def is_directory(path):
-    """Helper function to check if the path is a directory."""
-    try:
-        return S_ISDIR(sftp.stat(path).st_mode)
-    except IOError:
-        return False
-
-
 
 def disconnect_from_server():
     global client, sftp, transport
@@ -276,58 +379,88 @@ def disconnect_from_server():
             client.close()
         if transport:
             transport.close()
-        messagebox.showinfo("Disconnected", "Disconnected from the server.")
+        messagebox.showinfo("Disconnection", "Successfully disconnected from the server!")
+
+        # Reset the global variables
+        client = None
+        sftp = None
+        transport = None
+
+        # Disable the buttons after disconnecting
+        disable_buttons()
+
     except Exception as e:
         messagebox.showerror("Disconnection Error", str(e))
 
-# Helper function to enable buttons after a successful connection
 def enable_buttons():
     upload_btn.config(state=tk.NORMAL)
     download_btn.config(state=tk.NORMAL)
+    delete_btn.config(state=tk.NORMAL)
     manage_folders_btn.config(state=tk.NORMAL)
     disconnect_btn.config(state=tk.NORMAL)
 
-# Set up the GUI window
-root = tk.Tk()
-root.title("Delta HPC Server File Management")
+def disable_buttons():
+    upload_btn.config(state=tk.DISABLED)
+    download_btn.config(state=tk.DISABLED)
+    delete_btn.config(state=tk.DISABLED)
+    manage_folders_btn.config(state=tk.DISABLED)
+    disconnect_btn.config(state=tk.DISABLED)
 
-# Create GUI elements for user input
-tk.Label(root, text="Username:").pack(pady=5)
+# Initialize the main window
+root = tk.Tk()
+root.title("Delta HPC File Manager")
+
+# Set the window size
+root.geometry("700x600")
+
+# Username label and entry
+username_label = tk.Label(root, text="Username:")
+username_label.pack(pady=5)
 username_entry = tk.Entry(root, width=40)
 username_entry.pack(pady=5)
 
-tk.Label(root, text="Password:").pack(pady=5)
+# Password label and entry
+password_label = tk.Label(root, text="Password:")
+password_label.pack(pady=5)
 password_entry = tk.Entry(root, show="*", width=40)
 password_entry.pack(pady=5)
 
-# Create buttons for connecting, uploading, downloading, managing folders, and disconnecting
-connect_btn = tk.Button(root, text="Connect to Server", command=connect_to_server)
+# Connect button
+connect_btn = tk.Button(root, text="Connect", width=20, command=connect_to_server)
 connect_btn.pack(pady=10)
 
-upload_btn = tk.Button(root, text="Upload File", command=upload_file, state=tk.DISABLED)
-upload_btn.pack(pady=10)
+# Upload button
+upload_btn = tk.Button(root, text="Upload File", width=20, state=tk.DISABLED, command=upload_file)
+upload_btn.pack(pady=5)
 
-download_btn = tk.Button(root, text="Download File", command=download_file, state=tk.DISABLED)
-download_btn.pack(pady=10)
+# Download button
+download_btn = tk.Button(root, text="Download File", width=20, state=tk.DISABLED, command=download_file)
+download_btn.pack(pady=5)
 
-manage_folders_btn = tk.Button(root, text="List current directory", command=manage_folders, state=tk.DISABLED)
-manage_folders_btn.pack(pady=10)
+# Delete button
+delete_btn = tk.Button(root, text="Delete File/Folder", width=20, state=tk.DISABLED, command=delete_file_or_folder)
+delete_btn.pack(pady=5)
 
-disconnect_btn = tk.Button(root, text="Disconnect", command=disconnect_from_server, state=tk.DISABLED)
+# Manage Folders button
+manage_folders_btn = tk.Button(root, text="List Directory Contents", width=20, state=tk.DISABLED, command=manage_folders)
+manage_folders_btn.pack(pady=5)
+
+# Disconnect button
+disconnect_btn = tk.Button(root, text="Disconnect", width=20, state=tk.DISABLED, command=disconnect_from_server)
 disconnect_btn.pack(pady=10)
 
-# Add a progress bar for file upload and download
+# Progress bar
 progress_var = tk.DoubleVar()
-progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100, length=300)
+progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100, length=500)
 progress_bar.pack(pady=10)
 
-# Add a label for percentage
+# Percentage label
 percentage_label = tk.Label(root, text="0%")
 percentage_label.pack(pady=5)
 
+# Directory display
+directory_display = tk.Text(root, height=15, width=80, state=tk.DISABLED)
+directory_display.pack(pady=10)
 
-directory_content_display = tk.Text(root, height=10, width=80, state=tk.DISABLED)
-directory_content_display.pack(pady=10)
-
-# Start the Tkinter main loop
+# Start the GUI event loop
 root.mainloop()

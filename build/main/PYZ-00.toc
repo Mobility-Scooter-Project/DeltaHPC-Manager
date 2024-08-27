@@ -1,4 +1,5 @@
-('/Users/datnguyen/Downloads/Scooter Coding/node-hpc/build/main/PYZ-00.pyz',
+('/Users/datnguyen/Downloads/Research/Scooter '
+ 'Coding/node-hpc/build/main/PYZ-00.pyz',
  [('__future__',
    '/Users/datnguyen/anaconda3/envs/ssh-gui/lib/python3.8/__future__.py',
    'PYMODULE'),
