@@ -1,7 +1,3 @@
-Sure! Below is a template for your README file. You can customize it further as needed and add your image.
-
----
-
 # Delta HPC Server File Management Application
 
 This desktop application provides a simple graphical interface to manage files on the Delta HPC server at NCSA, including uploading, downloading, and managing directories via SFTP. It is designed to work on both macOS and Windows.
