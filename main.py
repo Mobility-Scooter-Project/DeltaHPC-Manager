@@ -9,6 +9,7 @@ import time
 import cv2
 import random
 import atexit
+import tempfile
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPushButton, QSlider, QLabel
 from PyQt5.QtGui import QImage, QPixmap
@@ -536,8 +537,9 @@ def stream_video_preview():
                 error_msg = stderr.read().decode()
                 raise Exception(f"FFmpeg error: {error_msg}")
             
+            temp_dir = tempfile.gettempdir()  # Get a system-specific temporary directory
+            local_temp_path = os.path.join(temp_dir, f"tmp_{random.getrandbits(128)}.mp4")
             
-            local_temp_path = f"tmp_{random.getrandbits(128)}.mp4"
             with open(local_temp_path, 'wb') as file_handle:
                 sftp.getfo(remote_temp_path, file_handle)
             
