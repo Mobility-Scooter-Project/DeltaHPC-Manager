@@ -6,12 +6,21 @@ import os
 from threading import Thread
 from stat import S_ISDIR
 import time
+import cv2
+import random
+import atexit
+
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPushButton, QSlider, QLabel
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtCore import QTimer, Qt
+
 
 # Global variables to hold the SSH client, SFTP session, and transport
 client = None
 sftp = None
 transport = None
 username = ""
+local_temp_path = None
 
 def duo_authentication_handler(title, instructions, fields):
     responses = []
@@ -85,7 +94,7 @@ def upload_file():
                 return
 
             # Default remote directory path
-            default_path = f"/projects/bddu/data"
+            default_path = f"/projects/bddu/data_setup/data"
 
             # Ask the user for a subdirectory where the file will be uploaded, appended to the default path
             subdir = simpledialog.askstring("Upload Directory", f"Enter the subdirectory path (relative to {default_path}):")
@@ -148,7 +157,7 @@ def download_file():
         if sftp is None:
             messagebox.showerror("Download Error", "Not connected to the server.")
             return
-        default_path = f"/projects/bddu/data"
+        default_path = f"/projects/bddu/data_setup/data"
         # Ask the user for the remote path of the file to be downloaded
         remote_file = simpledialog.askstring("Remote Path", f"Enter the remote path of the file to download (relative to {default_path}):")
         
@@ -204,7 +213,7 @@ def delete_file_or_folder():
             return
 
         # Default remote directory path
-        default_path = f"/projects/bddu/data"
+        default_path = f"/projects/bddu/data_setup/data"
         
         # Ask the user for the path of the file/folder to be deleted
         path_to_delete = simpledialog.askstring("Delete Path", f"Enter the remote path of the file/folder to delete (relative to {default_path}):")
@@ -331,7 +340,7 @@ def manage_folders():
             return
 
         # Default remote directory path
-        default_path = f"/projects/bddu/data"
+        default_path = f"/projects/bddu/data_setup/data"
         
         # Ask the user for the subdirectory to manage, appended to the default path
         subdir = simpledialog.askstring("Remote Directory", f"Enter the subdirectory path (relative to {default_path}):")
@@ -398,6 +407,7 @@ def enable_buttons():
     delete_btn.config(state=tk.NORMAL)
     manage_folders_btn.config(state=tk.NORMAL)
     disconnect_btn.config(state=tk.NORMAL)
+    stream_preview_btn.config(state=tk.NORMAL)
 
 def disable_buttons():
     upload_btn.config(state=tk.DISABLED)
@@ -405,9 +415,156 @@ def disable_buttons():
     delete_btn.config(state=tk.DISABLED)
     manage_folders_btn.config(state=tk.DISABLED)
     disconnect_btn.config(state=tk.DISABLED)
+    stream_preview_btn.config(state=tk.DISABLED)
+
+
+
+
+class VideoPlayer(QMainWindow):
+    def __init__(self, video_source):
+        super().__init__()
+
+        self.setWindowTitle('Video Preview')
+        self.setGeometry(100, 100, 800, 600)
+
+        self.video_source = video_source
+        self.vid = cv2.VideoCapture(self.video_source)
+
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+
+        self.layout = QVBoxLayout()
+        self.central_widget.setLayout(self.layout)
+
+        self.video_label = QLabel()
+        self.layout.addWidget(self.video_label)
+
+        self.play_button = QPushButton('Play')
+        self.play_button.clicked.connect(self.play)
+        self.layout.addWidget(self.play_button)
+
+        self.pause_button = QPushButton('Pause')
+        self.pause_button.clicked.connect(self.pause)
+        self.layout.addWidget(self.pause_button)
+
+        self.progress_slider = QSlider(Qt.Horizontal)
+        self.progress_slider.setMinimum(0)
+        self.progress_slider.setMaximum(int(self.vid.get(cv2.CAP_PROP_FRAME_COUNT)))
+        self.progress_slider.valueChanged.connect(self.set_frame)
+        self.layout.addWidget(self.progress_slider)
+
+        self.is_paused = False
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_frame)
+        self.timer.start(30)
+
+    def play(self):
+        self.is_paused = False
+
+    def pause(self):
+        self.is_paused = True
+
+    def set_frame(self, position):
+        self.vid.set(cv2.CAP_PROP_POS_FRAMES, position)
+
+    def update_frame(self):
+        if not self.is_paused:
+            ret, frame = self.vid.read()
+            if ret:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = frame.shape
+                bytes_per_line = ch * w
+                q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                pixmap = QPixmap.fromImage(q_img)
+                self.video_label.setPixmap(pixmap)
+                self.progress_slider.setValue(int(self.vid.get(cv2.CAP_PROP_POS_FRAMES)))
+            else:
+                self.vid.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+def cleanup(local_temp_path, remote_temp_path, client):
+    """Ensure the cleanup of local and remote temporary files."""
+    try:
+        # Clean up the local temporary file
+        if local_temp_path and os.path.exists(local_temp_path):
+            os.remove(local_temp_path)
+            print(f"Local file {local_temp_path} deleted.")
+        
+        # Clean up the remote temporary file
+        if remote_temp_path and client:
+            client.exec_command(f'rm {remote_temp_path}')
+            print(f"Remote file {remote_temp_path} deleted.")
+    except Exception as e:
+        print(f"Error during cleanup: {e}")
+
+
+
+def stream_video_preview():
+    global sftp, client
+    global local_temp_path
+    remote_temp_path = None
+
+    try:
+        if client is None:
+            messagebox.showerror("Preview Error", "Not connected to the server.")
+            return
+
+        # Ask the user for the remote path of the video file to preview
+        default_path = f"/projects/bddu/data_setup/data"
+        remote_file = simpledialog.askstring("Video Preview", f"Enter the remote path of the video (relative to {default_path}):")
+        
+        if remote_file:
+            remote_path = os.path.join(default_path, remote_file)
+            
+            # Define the path for the temporary file on the server
+            remote_temp_path = os.path.join("/projects/bddu/data_setup", f"tmp/temp_preview_{random.getrandbits(128)}.mp4")
+
+            # Move current directory to project
+            client.exec_command(f"cd {default_path}")
+
+            # Define the ffmpeg command to extract the first 5 seconds
+            ffmpeg_cmd = (
+                f"ffmpeg -ss 00:00:00 -i {remote_path} -t 00:00:05 -c copy {remote_temp_path}"
+            )
+
+            # Execute the ffmpeg command on the remote server
+            stdin, stdout, stderr = client.exec_command(ffmpeg_cmd)
+            
+            # Wait for the command to finish
+            exit_status = stdout.channel.recv_exit_status()
+            if exit_status != 0:
+                error_msg = stderr.read().decode()
+                raise Exception(f"FFmpeg error: {error_msg}")
+            
+            
+            local_temp_path = f"tmp_{random.getrandbits(128)}.mp4"
+            with open(local_temp_path, 'wb') as file_handle:
+                sftp.getfo(remote_temp_path, file_handle)
+            
+            # Remove the temporary file on the remote server
+            client.exec_command(f'rm {remote_temp_path}')
+            
+            atexit.register(cleanup, local_temp_path, remote_temp_path, client)
+
+            # Initialize and start the video player
+            app = QApplication([])
+            player = VideoPlayer(local_temp_path)
+            player.show()
+            app.exec_()
+
+            # Clean up temporary local file
+            os.remove(local_temp_path)
+
+    except Exception as e:
+        messagebox.showerror("Preview Error", str(e))
+    finally:
+        # Cleanup remote file in case of any error
+        cleanup(local_temp_path, remote_temp_path, client)
+
 
 # Initialize the main window
 root = tk.Tk()
+
 root.title("Delta HPC File Manager")
 
 # Set the window size
@@ -445,6 +602,9 @@ delete_btn.pack(pady=5)
 manage_folders_btn = tk.Button(root, text="List Directory Contents", width=20, state=tk.DISABLED, command=manage_folders)
 manage_folders_btn.pack(pady=5)
 
+stream_preview_btn = tk.Button(root, text="Stream Preview Video", width=20, state=tk.DISABLED, command=stream_video_preview)
+stream_preview_btn.pack(pady=5)
+
 # Disconnect button
 disconnect_btn = tk.Button(root, text="Disconnect", width=20, state=tk.DISABLED, command=disconnect_from_server)
 disconnect_btn.pack(pady=10)
@@ -461,6 +621,7 @@ percentage_label.pack(pady=5)
 # Directory display
 directory_display = tk.Text(root, height=15, width=80, state=tk.DISABLED)
 directory_display.pack(pady=10)
+
 
 # Start the GUI event loop
 root.mainloop()
