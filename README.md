@@ -18,7 +18,7 @@ This desktop application provides a simple graphical interface to manage files o
 
 1. **Download and Extract:**
    - Download the `DeltaHPC_FileManager.zip` file from the release page.
-   - Extract the contents to a desired location on your computer.
+   - Extract the contents `dist_windows/DeltaHPC_FileManager.exe` to a desired location on your computer.
 
 2. **Run the Application:**
    - Double-click `DeltaHPC_FileManager.exe` to run the application.
@@ -27,7 +27,7 @@ This desktop application provides a simple graphical interface to manage files o
 
 1. **Download and Extract:**
    - Download the `DeltaHPC_FileManager.zip` file from the release page.
-   - Extract the `.app` file to your Applications folder or a desired location.
+   - Extract the `dist_macos/DeltaHPC_FileManager.app` file to your Applications folder or a desired location.
 
 2. **Run the Application:**
    - Double-click `DeltaHPC_FileManager.app` to run the application.

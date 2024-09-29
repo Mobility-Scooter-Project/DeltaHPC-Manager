@@ -1,0 +1,3 @@
+paramiko
+opencv-python
+pyqt5
