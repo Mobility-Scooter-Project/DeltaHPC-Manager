@@ -1,3 +1,0 @@
-([('main',
-   '/Users/datnguyen/Downloads/Research/Scooter Coding/node-hpc/dist/main',
-   'EXECUTABLE')],)
