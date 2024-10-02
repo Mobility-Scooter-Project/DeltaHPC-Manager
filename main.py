@@ -10,6 +10,7 @@ import cv2
 import random
 import atexit
 import tempfile
+import posixpath
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPushButton, QSlider, QLabel
 from PyQt5.QtGui import QImage, QPixmap
@@ -100,7 +101,7 @@ def upload_file():
             # Ask the user for a subdirectory where the file will be uploaded, appended to the default path
             subdir = simpledialog.askstring("Upload Directory", f"Enter the subdirectory path (relative to {default_path}):")
             if subdir:
-                remote_dir = os.path.join(default_path, subdir)
+                remote_dir = posixpath.join(default_path, subdir)
             else:
                 remote_dir = default_path
 
@@ -108,7 +109,18 @@ def upload_file():
             make_remote_dir(remote_dir)
 
             # Define the remote path where the file will be uploaded
-            remote_path = os.path.join(remote_dir, os.path.basename(file_path))
+            remote_path = posixpath.join(remote_dir, os.path.basename(file_path))
+
+            # Check if the file already exists on the server
+            try:
+                sftp.stat(remote_path)  # Check if the remote file exists
+                # If the file exists, prompt the user for confirmation to overwrite
+                overwrite = messagebox.askyesno("File Exists", "The file already exists on the server. Do you want to overwrite it?")
+                if not overwrite:
+                    return  # Cancel the upload if the user doesn't want to overwrite
+            except FileNotFoundError:
+                # If the file doesn't exist, proceed with the upload
+                pass
 
             # Get file size for progress tracking
             file_size = os.path.getsize(file_path)
@@ -122,6 +134,7 @@ def upload_file():
 
     except Exception as e:
         messagebox.showerror("Upload Error", str(e))
+
 
 def make_remote_dir(remote_dir):
     """Helper function to create a remote directory if it doesn't exist."""
@@ -167,7 +180,7 @@ def download_file():
             
             
         if remote_file:
-            remote_path = os.path.join(default_path, remote_file)
+            remote_path = posixpath.join(default_path, remote_file)
             # Check if the remote file exists
             try:
                 file_size = sftp.stat(remote_path).st_size
@@ -220,7 +233,7 @@ def delete_file_or_folder():
         path_to_delete = simpledialog.askstring("Delete Path", f"Enter the remote path of the file/folder to delete (relative to {default_path}):")
         
         if path_to_delete:
-            remote_path = os.path.join(default_path, path_to_delete)
+            remote_path = posixpath.join(default_path, path_to_delete)
 
             # Check if the remote path exists
             try:
@@ -248,7 +261,7 @@ def delete_file_or_folder():
 def delete_directory_recursive(remote_path):
     """Recursively delete a directory and all its contents."""
     for item in sftp.listdir(remote_path):
-        item_path = os.path.join(remote_path, item)
+        item_path = posixpath.join(remote_path, item)
         try:
             if is_directory(item_path):
                 delete_directory_recursive(item_path)  # Recursively delete subdirectory
@@ -291,7 +304,7 @@ def delete_folder(remote_path, total_size):
     """Recursively delete a folder and its contents with progress tracking."""
     try:
         for item in sftp.listdir_attr(remote_path):
-            item_path = os.path.join(remote_path, item.filename)
+            item_path = posixpath.join(remote_path, item.filename)
             if S_ISDIR(item.st_mode):
                 # Recursively delete the subdirectory
                 yield from delete_folder(item_path, total_size)
@@ -310,7 +323,7 @@ def calculate_directory_size(remote_path):
     total_size = 0
     try:
         for item in sftp.listdir_attr(remote_path):
-            item_path = os.path.join(remote_path, item.filename)
+            item_path = posixpath.join(remote_path, item.filename)
             if S_ISDIR(item.st_mode):
                 total_size += calculate_directory_size(item_path)
             else:
@@ -346,7 +359,7 @@ def manage_folders():
         # Ask the user for the subdirectory to manage, appended to the default path
         subdir = simpledialog.askstring("Remote Directory", f"Enter the subdirectory path (relative to {default_path}):")
         if subdir:
-            remote_dir = os.path.join(default_path, subdir)
+            remote_dir = posixpath.join(default_path, subdir)
         else:
             remote_dir = default_path
 
@@ -515,10 +528,10 @@ def stream_video_preview():
         remote_file = simpledialog.askstring("Video Preview", f"Enter the remote path of the video (relative to {default_path}):")
         
         if remote_file:
-            remote_path = os.path.join(default_path, remote_file)
+            remote_path = posixpath.join(default_path, remote_file)
             
             # Define the path for the temporary file on the server
-            remote_temp_path = os.path.join("/projects/bddu/data_setup", f"tmp/temp_preview_{random.getrandbits(128)}.mp4")
+            remote_temp_path = posixpath.join("/projects/bddu/data_setup", f"tmp/temp_preview_{random.getrandbits(128)}.mp4")
 
             # Move current directory to project
             client.exec_command(f"cd {default_path}")
@@ -538,7 +551,7 @@ def stream_video_preview():
                 raise Exception(f"FFmpeg error: {error_msg}")
             
             temp_dir = tempfile.gettempdir()  # Get a system-specific temporary directory
-            local_temp_path = os.path.join(temp_dir, f"tmp_{random.getrandbits(128)}.mp4")
+            local_temp_path = posixpath.join(temp_dir, f"tmp_{random.getrandbits(128)}.mp4")
             
             with open(local_temp_path, 'wb') as file_handle:
                 sftp.getfo(remote_temp_path, file_handle)
