@@ -4,7 +4,7 @@ This desktop application provides a simple graphical interface to manage files o
 
 ![Screenshot of the Application](sample.png)
 
-Demo Video: https://www.youtube.com/watch?v=NJ3uQ28X2So
+Demo Video: https://youtu.be/FUhbKD9mmDQ
 
 ## Features
 
