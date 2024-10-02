@@ -499,15 +499,17 @@ class VideoPlayer(QMainWindow):
 def cleanup(local_temp_path, remote_temp_path, client):
     """Ensure the cleanup of local and remote temporary files."""
     try:
+        # Clean up the remote temporary file
+        if remote_temp_path and client:
+            client.exec_command(f'rm {remote_temp_path}')
+            print(f"Remote file {remote_temp_path} deleted.")
+
         # Clean up the local temporary file
         if local_temp_path and os.path.exists(local_temp_path):
             os.remove(local_temp_path)
             print(f"Local file {local_temp_path} deleted.")
         
-        # Clean up the remote temporary file
-        if remote_temp_path and client:
-            client.exec_command(f'rm {remote_temp_path}')
-            print(f"Remote file {remote_temp_path} deleted.")
+        
     except Exception as e:
         print(f"Error during cleanup: {e}")
 
@@ -551,10 +553,13 @@ def stream_video_preview():
                 raise Exception(f"FFmpeg error: {error_msg}")
             
             temp_dir = tempfile.gettempdir()  # Get a system-specific temporary directory
-            local_temp_path = posixpath.join(temp_dir, f"tmp_{random.getrandbits(128)}.mp4")
+            local_temp_path = os.path.join(temp_dir, f"tmp_{random.getrandbits(128)}.mp4")
             
+            remote_file_size = sftp.stat(remote_temp_path).st_size
+
             with open(local_temp_path, 'wb') as file_handle:
                 sftp.getfo(remote_temp_path, file_handle)
+
             
             # Remove the temporary file on the remote server
             client.exec_command(f'rm {remote_temp_path}')
@@ -571,7 +576,8 @@ def stream_video_preview():
             os.remove(local_temp_path)
 
     except Exception as e:
-        messagebox.showerror("Preview Error", str(e))
+        # messagebox.showerror("Preview Error", str(e))
+        print("Preview Error", str(e))
     finally:
         # Cleanup remote file in case of any error
         cleanup(local_temp_path, remote_temp_path, client)
