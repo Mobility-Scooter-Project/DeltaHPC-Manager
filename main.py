@@ -3,7 +3,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import paramiko
 from paramiko.ssh_exception import SSHException
 import os
-from threading import Thread
+from threading import Thread, Lock
 from stat import S_ISDIR
 import time
 import cv2
@@ -16,13 +16,13 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPu
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import QTimer, Qt
 
-
 # Global variables to hold the SSH client, SFTP session, and transport
 client = None
 sftp = None
 transport = None
 username = ""
 local_temp_path = None
+socket_lock = Lock()
 
 def duo_authentication_handler(title, instructions, fields):
     responses = []
@@ -88,13 +88,8 @@ def upload_file():
             return
 
         # Open a file dialog to select a file
-        file_path = filedialog.askopenfilename()
-        if file_path:
-            # Check if the file exists locally
-            if not os.path.isfile(file_path):
-                messagebox.showerror("Upload Error", "The selected file does not exist.")
-                return
-
+        file_paths = filedialog.askopenfilename(multiple = True)
+        if file_paths: 
             # Default remote directory path
             default_path = f"/projects/bddu/data_setup/data"
 
@@ -108,33 +103,46 @@ def upload_file():
             # Ensure the directory exists, create it if it doesn't
             make_remote_dir(remote_dir)
 
-            # Define the remote path where the file will be uploaded
-            remote_path = posixpath.join(remote_dir, os.path.basename(file_path))
+        threads = []
+        for file in file_paths: 
+            if file:
+                # Check if the file exists locally
+                if not os.path.isfile(file):
+                    messagebox.showerror("Upload Error", "The selected file(s) does not exist.")
+                    return
+                
+                # Define the remote path where the file will be uploaded
+                remote_path = posixpath.join(remote_dir, os.path.basename(file))
 
-            # Check if the file already exists on the server
-            try:
-                sftp.stat(remote_path)  # Check if the remote file exists
-                # If the file exists, prompt the user for confirmation to overwrite
-                overwrite = messagebox.askyesno("File Exists", "The file already exists on the server. Do you want to overwrite it?")
-                if not overwrite:
-                    return  # Cancel the upload if the user doesn't want to overwrite
-            except FileNotFoundError:
-                # If the file doesn't exist, proceed with the upload
-                pass
+                # Check if the file already exists on the server
+                try:
+                    sftp.stat(remote_path)  # Check if the remote file exists
+                    # If the file exists, prompt the user for confirmation to overwrite
+                    file_name = file.split('/')[-1]
+                    overwrite = messagebox.askyesno("File Exists", f"The file \"{file_name}\" already exists on the server. Do you want to overwrite it?")
+                    if not overwrite:
+                        continue  # Cancel the upload if the user doesn't want to overwrite
+                except FileNotFoundError:
+                    # If the file doesn't exist, proceed with the upload
+                    pass
 
-            # Get file size for progress tracking
-            file_size = os.path.getsize(file_path)
+                # Get file size for progress tracking
+                file_size = os.path.getsize(file)
 
-            # Initialize the progress bar and percentage label
-            progress_var.set(0)
-            percentage_label.config(text="0%")
+                # Initialize the progress bar and percentage label
+                progress_var.set(0)
+                percentage_label.config(text="0%")
 
-            # Start upload in a separate thread to avoid blocking the GUI
-            Thread(target=upload_file_thread, args=(file_path, remote_path, file_size)).start()
+                # Start upload in a separate thread to avoid blocking the GUI
+                thread = Thread(target=upload_file_thread, args=(file, remote_path, file_size))
+                thread.start()
+                threads.append(thread)
+
+        if threads:
+            check_threads(threads)
 
     except Exception as e:
         messagebox.showerror("Upload Error", str(e))
-
 
 def make_remote_dir(remote_dir):
     """Helper function to create a remote directory if it doesn't exist."""
@@ -149,20 +157,29 @@ def make_remote_dir(remote_dir):
                 sftp.mkdir(path)
 
 def upload_file_thread(file_path, remote_path, file_size):
-    try:
-        def progress_callback(transferred, total):
-            # Calculate the progress percentage
-            progress = (transferred / file_size) * 100
-            # Update the progress on the main thread
-            root.after(0, update_progress_bar, progress)
+    with socket_lock:
+        try:
+            def progress_callback(transferred, total):
+                # Calculate the progress percentage
+                progress = (transferred / file_size) * 100
+                # Update the progress on the main thread
+                root.after(0, update_progress_bar, progress)
 
-        with open(file_path, 'rb') as file_handle:
-            sftp.putfo(file_handle, remote_path, callback=progress_callback)
-        messagebox.showinfo("Upload", f"Successfully uploaded {os.path.basename(file_path)}")
-        # Reset progress bar and percentage label
-        root.after(0, update_progress_bar, 0)
-    except Exception as e:
-        messagebox.showerror("Upload Error", str(e))
+            with open(file_path, 'rb') as file_handle:
+                sftp.putfo(file_handle, remote_path, callback=progress_callback)
+            # Reset progress bar and percentage label
+            root.after(0, update_progress_bar, 0)
+        
+        except Exception as e:
+            root.after(0, messagebox.showerror, "Upload Error", str(e))
+
+def check_threads(threads):
+    alive_threads = [t for t in threads if t.is_alive()]
+    if alive_threads:
+        # If the thread is still running, check again after 100ms
+        root.after(100, check_threads, alive_threads)
+    else:
+        root.after(0, messagebox.showinfo, "Upload", f"File(s) successfully uploaded")
 
 def download_file():
     global sftp
@@ -175,10 +192,6 @@ def download_file():
         # Ask the user for the remote path of the file to be downloaded
         remote_file = simpledialog.askstring("Remote Path", f"Enter the remote path of the file to download (relative to {default_path}):")
         
-        
-            
-            
-            
         if remote_file:
             remote_path = posixpath.join(default_path, remote_file)
             # Check if the remote file exists
@@ -431,9 +444,6 @@ def disable_buttons():
     disconnect_btn.config(state=tk.DISABLED)
     stream_preview_btn.config(state=tk.DISABLED)
 
-
-
-
 class VideoPlayer(QMainWindow):
     def __init__(self, video_source):
         super().__init__()
@@ -512,8 +522,6 @@ def cleanup(local_temp_path, remote_temp_path, client):
         
     except Exception as e:
         print(f"Error during cleanup: {e}")
-
-
 
 def stream_video_preview():
     global sftp, client
@@ -608,7 +616,7 @@ connect_btn = tk.Button(root, text="Connect", width=20, command=connect_to_serve
 connect_btn.pack(pady=10)
 
 # Upload button
-upload_btn = tk.Button(root, text="Upload File", width=20, state=tk.DISABLED, command=upload_file)
+upload_btn = tk.Button(root, text="Upload File(s)", width=20, state=tk.DISABLED, command=upload_file)
 upload_btn.pack(pady=5)
 
 # Download button
@@ -642,7 +650,6 @@ percentage_label.pack(pady=5)
 # Directory display
 directory_display = tk.Text(root, height=15, width=80, state=tk.DISABLED)
 directory_display.pack(pady=10)
-
 
 # Start the GUI event loop
 root.mainloop()
