@@ -549,8 +549,8 @@ def stream_video_preview():
 
             # Define the ffmpeg command to extract the first 5 seconds
             ffmpeg_cmd = (
-                'export LD_LIBRARY_PATH=~/ffmpeg/lib:$LD_LIBRARY_PATH && '
-                f'~/ffmpeg/bin/ffmpeg -ss 00:00:00 -i "{remote_path}" -t 00:00:05 -c copy "{remote_temp_path}"'
+                'export LD_LIBRARY_PATH=/projects/bddu/ffmpeg/lib:$LD_LIBRARY_PATH && '
+                f'/projects/bddu/ffmpeg/bin/ffmpeg -ss 00:00:00 -i "{remote_path}" -t 00:00:05 -c copy "{remote_temp_path}"'
             )
 
             # Execute the ffmpeg command on the remote server
