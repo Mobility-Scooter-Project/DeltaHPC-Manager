@@ -511,7 +511,7 @@ def cleanup(local_temp_path, remote_temp_path, client):
     try:
         # Clean up the remote temporary file
         if remote_temp_path and client:
-            client.exec_command(f'rm {remote_temp_path}')
+            client.exec_command(f'rm "{remote_temp_path}"')
             print(f"Remote file {remote_temp_path} deleted.")
 
         # Clean up the local temporary file
@@ -538,8 +538,9 @@ def stream_video_preview():
         remote_file = simpledialog.askstring("Video Preview", f"Enter the remote path of the video (relative to {default_path}):")
         
         if remote_file:
+            print("AAA", remote_file)
             remote_path = posixpath.join(default_path, remote_file)
-            
+            print("BBB", remote_path)
             # Define the path for the temporary file on the server
             remote_temp_path = posixpath.join("/projects/bddu/data_setup", f"tmp/temp_preview_{random.getrandbits(128)}.mp4")
 
@@ -548,7 +549,8 @@ def stream_video_preview():
 
             # Define the ffmpeg command to extract the first 5 seconds
             ffmpeg_cmd = (
-                f"ffmpeg -ss 00:00:00 -i {remote_path} -t 00:00:05 -c copy {remote_temp_path}"
+                'export LD_LIBRARY_PATH=~/ffmpeg/lib:$LD_LIBRARY_PATH && '
+                f'~/ffmpeg/bin/ffmpeg -ss 00:00:00 -i "{remote_path}" -t 00:00:05 -c copy "{remote_temp_path}"'
             )
 
             # Execute the ffmpeg command on the remote server
@@ -570,7 +572,7 @@ def stream_video_preview():
 
             
             # Remove the temporary file on the remote server
-            client.exec_command(f'rm {remote_temp_path}')
+            client.exec_command(f'rm "{remote_temp_path}"')
             
             atexit.register(cleanup, local_temp_path, remote_temp_path, client)
 
