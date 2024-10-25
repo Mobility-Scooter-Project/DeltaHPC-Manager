@@ -4,6 +4,8 @@ This desktop application provides a simple graphical interface to manage files o
 
 ![Screenshot of the Application](sample.png)
 
+Demo Video: https://youtu.be/FUhbKD9mmDQ
+
 ## Features
 
 - **Connect to Delta HPC Server:** Connect to the Delta HPC server using your username and password, with support for Duo MFA authentication.
