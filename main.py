@@ -106,10 +106,11 @@ def upload_file():
         threads = []
         for file in file_paths: 
             if file:
+                file_name = file.split('/')[-1]
                 # Check if the file exists locally
                 if not os.path.isfile(file):
-                    messagebox.showerror("Upload Error", "The selected file(s) does not exist.")
-                    return
+                    messagebox.showerror("Upload Error", f"The selected file \"{file_name}\" does not exist.")
+                    continue
                 
                 # Define the remote path where the file will be uploaded
                 remote_path = posixpath.join(remote_dir, os.path.basename(file))
@@ -118,7 +119,6 @@ def upload_file():
                 try:
                     sftp.stat(remote_path)  # Check if the remote file exists
                     # If the file exists, prompt the user for confirmation to overwrite
-                    file_name = file.split('/')[-1]
                     overwrite = messagebox.askyesno("File Exists", f"The file \"{file_name}\" already exists on the server. Do you want to overwrite it?")
                     if not overwrite:
                         continue  # Cancel the upload if the user doesn't want to overwrite
@@ -135,11 +135,12 @@ def upload_file():
 
                 # Start upload in a separate thread to avoid blocking the GUI
                 thread = Thread(target=upload_file_thread, args=(file, remote_path, file_size))
+                disable_buttons()
                 thread.start()
                 threads.append(thread)
 
         if threads:
-            check_threads(threads)
+            check_threads(threads, "uploaded")
 
     except Exception as e:
         messagebox.showerror("Upload Error", str(e))
@@ -173,13 +174,18 @@ def upload_file_thread(file_path, remote_path, file_size):
         except Exception as e:
             root.after(0, messagebox.showerror, "Upload Error", str(e))
 
-def check_threads(threads):
-    alive_threads = [t for t in threads if t.is_alive()]
+def check_threads(threads, action):
+    alive_threads = []
+    for thread in threads:
+        if thread.is_alive():
+            alive_threads.append(thread)
+
     if alive_threads:
         # If the thread is still running, check again after 100ms
-        root.after(100, check_threads, alive_threads)
+        root.after(100, check_threads, alive_threads, action)
     else:
-        root.after(0, messagebox.showinfo, "Upload", f"File(s) successfully uploaded")
+        root.after(0, messagebox.showinfo, "Upload", f"File(s) successfully {action}")
+        enable_buttons()
 
 def download_file():
     global sftp
@@ -190,47 +196,58 @@ def download_file():
             return
         default_path = f"/projects/bddu/data_setup/data"
         # Ask the user for the remote path of the file to be downloaded
-        remote_file = simpledialog.askstring("Remote Path", f"Enter the remote path of the file to download (relative to {default_path}):")
+        file_string = simpledialog.askstring("Remote Path", f"Enter the remote path of the file to download. If more than one file, seperate the paths by commas(e.g., test.mp4, test1.mp4):")
         
-        if remote_file:
-            remote_path = posixpath.join(default_path, remote_file)
-            # Check if the remote file exists
-            try:
-                file_size = sftp.stat(remote_path).st_size
-            except FileNotFoundError:
-                messagebox.showerror("Download Error", "The remote file does not exist.")
-                return
+        remote_files = []
+        if file_string:
+            remote_files = file_string.split(", ")
 
-            # Open a file dialog to select a save location
-            file_path = filedialog.asksaveasfilename(initialfile=os.path.basename(remote_path))
-            if file_path:
-                # Initialize the progress bar and percentage label
-                progress_var.set(0)
-                percentage_label.config(text="0%")
+        threads = []
+        for remote_file in remote_files:
+            if remote_file:
+                remote_path = posixpath.join(default_path, remote_file)
+                # Check if the remote file exists
+                try:
+                    file_size = sftp.stat(remote_path).st_size
+                except FileNotFoundError:
+                    messagebox.showerror("Download Error", f"The remote file \"{remote_file}\" does not exist.")
+                    continue
 
-                # Start download in a separate thread to avoid blocking the GUI
-                Thread(target=download_file_thread, args=(remote_path, file_path, file_size)).start()
+                # Open a file dialog to select a save location
+                file_path = filedialog.asksaveasfilename(initialfile=os.path.basename(remote_path))
+                if file_path:
+                    # Initialize the progress bar and percentage label
+                    progress_var.set(0)
+                    percentage_label.config(text="0%")
+
+                    # Start download in a separate thread to avoid blocking the GUI
+                    thread = Thread(target=download_file_thread, args=(remote_path, file_path, file_size))
+                    disable_buttons()
+                    thread.start()
+                    threads.append(thread)
+        if threads:
+            check_threads(threads, "downloaded")   
 
     except Exception as e:
         messagebox.showerror("Download Error", str(e))
 
 def download_file_thread(remote_path, file_path, file_size):
-    try:
-        def progress_callback(transferred, total):
-            # Calculate the progress percentage
-            progress = (transferred / total) * 100
-            # Update the progress on the main thread
-            root.after(0, update_progress_bar, progress)
+    with socket_lock:
+        try:
+            def progress_callback(transferred, total):
+                # Calculate the progress percentage
+                progress = (transferred / total) * 100
+                # Update the progress on the main thread
+                root.after(0, update_progress_bar, progress)
 
-        # Download the file
-        with open(file_path, 'wb') as file_handle:
-            sftp.getfo(remote_path, file_handle, callback=progress_callback)
-        messagebox.showinfo("Download", f"Successfully downloaded {os.path.basename(file_path)}")
-        # Reset progress bar and percentage label
-        root.after(0, update_progress_bar, 0)
-    except Exception as e:
-        messagebox.showerror("Download Error", str(e))
-
+            # Download the file
+            with open(file_path, 'wb') as file_handle:
+                sftp.getfo(remote_path, file_handle, callback=progress_callback)
+            # Reset progress bar and percentage label
+            root.after(0, update_progress_bar, 0)
+        except Exception as e:
+            messagebox.showerror("Download Error", str(e))
+            
 def delete_file_or_folder():
     global sftp
     try:
@@ -622,7 +639,7 @@ upload_btn = tk.Button(root, text="Upload File(s)", width=20, state=tk.DISABLED,
 upload_btn.pack(pady=5)
 
 # Download button
-download_btn = tk.Button(root, text="Download File", width=20, state=tk.DISABLED, command=download_file)
+download_btn = tk.Button(root, text="Download File(s)", width=20, state=tk.DISABLED, command=download_file)
 download_btn.pack(pady=5)
 
 # Delete button
