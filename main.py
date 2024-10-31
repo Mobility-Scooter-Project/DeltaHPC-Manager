@@ -140,7 +140,7 @@ def upload_file():
                 threads.append(thread)
 
         if threads:
-            check_threads(threads, "uploaded")
+            check_threads(threads, "Upload")
 
     except Exception as e:
         messagebox.showerror("Upload Error", str(e))
@@ -184,7 +184,7 @@ def check_threads(threads, action):
         # If the thread is still running, check again after 100ms
         root.after(100, check_threads, alive_threads, action)
     else:
-        root.after(0, messagebox.showinfo, "Upload", f"File(s) successfully {action}")
+        root.after(0, messagebox.showinfo, action, f"File(s) successfully {action.lower()}ed")
         enable_buttons()
 
 def download_file():
@@ -225,8 +225,9 @@ def download_file():
                     disable_buttons()
                     thread.start()
                     threads.append(thread)
+                    
         if threads:
-            check_threads(threads, "downloaded")   
+            check_threads(threads, "Download")   
 
     except Exception as e:
         messagebox.showerror("Download Error", str(e))
@@ -247,7 +248,7 @@ def download_file_thread(remote_path, file_path, file_size):
             root.after(0, update_progress_bar, 0)
         except Exception as e:
             messagebox.showerror("Download Error", str(e))
-            
+
 def delete_file_or_folder():
     global sftp
     try:
