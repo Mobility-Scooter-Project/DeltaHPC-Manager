@@ -261,30 +261,37 @@ def delete_file_or_folder():
         default_path = f"/projects/bddu/data_setup/data"
         
         # Ask the user for the path of the file/folder to be deleted
-        path_to_delete = simpledialog.askstring("Delete Path", f"Enter the remote path of the file/folder to delete (relative to {default_path}):")
+        # path_to_delete = simpledialog.askstring("Delete Path", f"Enter the remote path of the file/folder to delete (relative to {default_path}):")
         
-        if path_to_delete:
-            remote_path = posixpath.join(default_path, path_to_delete)
+        paths_string = simpledialog.askstring("Remote Path", f"Enter the remote path of the file/folder to delete. If more than one file/folder, seperate the paths by commas(e.g., test.mp4, test):")
 
-            # Check if the remote path exists
-            try:
-                file_stat = sftp.stat(remote_path)
-            except FileNotFoundError:
-                messagebox.showerror("Deletion Error", "The specified file or folder does not exist.")
-                return
+        paths_to_delete = []
+        if paths_string:
+            paths_to_delete = paths_string.split(", ")
 
-            # Ask for user confirmation
-            confirm = messagebox.askyesno("Confirm Deletion", f"Are you sure you want to permanently delete '{remote_path}'?")
-            if not confirm:
-                return  # User canceled the deletion
+        for path_to_delete in paths_to_delete:
+            if path_to_delete:
+                remote_path = posixpath.join(default_path, path_to_delete)
 
-            # If it's a directory, delete it recursively
-            if S_ISDIR(file_stat.st_mode):
-                delete_directory_recursive(remote_path)
-            else:
-                sftp.remove(remote_path)  # If it's a file, delete it directly
+                # Check if the remote path exists
+                try:
+                    file_stat = sftp.stat(remote_path)
+                except FileNotFoundError:
+                    messagebox.showerror("Deletion Error", f"The specified file or folder \"{path_to_delete}\"  does not exist.")
+                    continue
 
-            messagebox.showinfo("Deletion Complete", f"Successfully deleted '{remote_path}'")
+                # Ask for user confirmation
+                confirm = messagebox.askyesno("Confirm Deletion", f"Are you sure you want to permanently delete '{remote_path}'?")
+                if not confirm:
+                    continue  # User canceled the deletion
+
+                # If it's a directory, delete it recursively
+                if S_ISDIR(file_stat.st_mode):
+                    delete_directory_recursive(remote_path)
+                else:
+                    sftp.remove(remote_path)  # If it's a file, delete it directly
+
+                messagebox.showinfo("Deletion Complete", f"Successfully deleted '{remote_path}'")
     
     except Exception as e:
         messagebox.showerror("Deletion Error", str(e))
@@ -644,7 +651,7 @@ download_btn = tk.Button(root, text="Download File(s)", width=20, state=tk.DISAB
 download_btn.pack(pady=5)
 
 # Delete button
-delete_btn = tk.Button(root, text="Delete File/Folder", width=20, state=tk.DISABLED, command=delete_file_or_folder)
+delete_btn = tk.Button(root, text="Delete File(s)/Folder(s)", width=20, state=tk.DISABLED, command=delete_file_or_folder)
 delete_btn.pack(pady=5)
 
 # Manage Folders button
