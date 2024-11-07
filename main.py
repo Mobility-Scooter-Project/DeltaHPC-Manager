@@ -87,12 +87,13 @@ def upload_file():
             messagebox.showerror("Upload Error", "Not connected to the server.")
             return
 
+        default_path = f"/projects/bddu/data_setup/data"
+        Thread(target=display_directories, args = (default_path,)).start()
+
         # Open a file dialog to select a file
         file_paths = filedialog.askopenfilename(multiple = True)
         if file_paths: 
             # Default remote directory path
-            default_path = f"/projects/bddu/data_setup/data"
-
             # Ask the user for a subdirectory where the file will be uploaded, appended to the default path
             subdir = simpledialog.askstring("Upload Directory", f"Enter the subdirectory path (relative to {default_path}):")
             if subdir:
@@ -138,9 +139,9 @@ def upload_file():
                 disable_buttons()
                 thread.start()
                 threads.append(thread)
-
+                
         if threads:
-            check_threads(threads, "Upload")
+            check_threads(threads, "Upload")                
 
     except Exception as e:
         messagebox.showerror("Upload Error", str(e))
@@ -194,7 +195,10 @@ def download_file():
         if sftp is None:
             messagebox.showerror("Download Error", "Not connected to the server.")
             return
+
         default_path = f"/projects/bddu/data_setup/data"
+        Thread(target=display_directories, args = (default_path,)).start()
+
         # Ask the user for the remote path of the file to be downloaded
         file_string = simpledialog.askstring("Remote Path", f"Enter the remote path of the file to download. If more than one file, seperate the paths by commas(e.g., test.mp4, test1.mp4):")
         
@@ -259,10 +263,9 @@ def delete_file_or_folder():
 
         # Default remote directory path
         default_path = f"/projects/bddu/data_setup/data"
-        
-        # Ask the user for the path of the file/folder to be deleted
-        # path_to_delete = simpledialog.askstring("Delete Path", f"Enter the remote path of the file/folder to delete (relative to {default_path}):")
-        
+        Thread(target=display_directories, args = (default_path,)).start()
+
+        # Ask the user for the path of the file/folder to be deleted    
         paths_string = simpledialog.askstring("Remote Path", f"Enter the remote path of the file/folder to delete. If more than one file/folder, seperate the paths by commas(e.g., test.mp4, test):")
 
         paths_to_delete = []
@@ -290,7 +293,9 @@ def delete_file_or_folder():
                     delete_directory_recursive(remote_path)
                 else:
                     sftp.remove(remote_path)  # If it's a file, delete it directly
-
+                
+                updated_directory = "/".join(remote_path.rsplit("/", 1)[:-1])
+                Thread(target=display_directories, args = (updated_directory,)).start()
                 messagebox.showinfo("Deletion Complete", f"Successfully deleted '{remote_path}'")
     
     except Exception as e:
@@ -408,27 +413,30 @@ def manage_folders():
             messagebox.showerror("Folder Management Error", "The specified directory does not exist.")
             return
 
-        # List directory contents
-        folder_contents = sftp.listdir_attr(remote_dir)
-        
-        # Clear the display area before showing updated directory contents
-        directory_display.config(state=tk.NORMAL)
-        directory_display.delete(1.0, tk.END)
-        directory_display.insert(tk.END, f"Contents of {remote_dir}:\n\n")
-        
-        for item in folder_contents:
-            item_name = item.filename
-            item_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(item.st_mtime))
-            item_size = f"{item.st_size} bytes"
-            if S_ISDIR(item.st_mode):
-                directory_display.insert(tk.END, f"[DIR]  {item_name}\t\n")
-            else:
-                directory_display.insert(tk.END, f"[FILE] {item_name}\t\n")
-        
-        directory_display.config(state=tk.DISABLED)
+        display_directories(remote_dir)
 
     except Exception as e:
         messagebox.showerror("Folder Management Error", str(e))
+
+def display_directories(remote_dir):
+    # List directory contents
+    folder_contents = sftp.listdir_attr(remote_dir)
+    
+    # Clear the display area before showing updated directory contents
+    directory_display.config(state=tk.NORMAL)
+    directory_display.delete(1.0, tk.END)
+    directory_display.insert(tk.END, f"Contents of {remote_dir}:\n\n")
+    
+    for item in folder_contents:
+        item_name = item.filename
+        item_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(item.st_mtime))
+        item_size = f"{item.st_size} bytes"
+        if S_ISDIR(item.st_mode):
+            directory_display.insert(tk.END, f"[DIR]  {item_name}\t\n")
+        else:
+            directory_display.insert(tk.END, f"[FILE] {item_name}\t\n")
+    
+    directory_display.config(state=tk.DISABLED)
 
 def disconnect_from_server():
     global client, sftp, transport
@@ -642,6 +650,10 @@ password_entry.pack(pady=5)
 connect_btn = tk.Button(root, text="Connect", width=20, command=connect_to_server)
 connect_btn.pack(pady=10)
 
+# Manage Folders button
+manage_folders_btn = tk.Button(root, text="List Directory Contents", width=20, state=tk.DISABLED, command=manage_folders)
+manage_folders_btn.pack(pady=5)
+
 # Upload button
 upload_btn = tk.Button(root, text="Upload File(s)", width=20, state=tk.DISABLED, command=upload_file)
 upload_btn.pack(pady=5)
@@ -654,10 +666,8 @@ download_btn.pack(pady=5)
 delete_btn = tk.Button(root, text="Delete File(s)/Folder(s)", width=20, state=tk.DISABLED, command=delete_file_or_folder)
 delete_btn.pack(pady=5)
 
-# Manage Folders button
-manage_folders_btn = tk.Button(root, text="List Directory Contents", width=20, state=tk.DISABLED, command=manage_folders)
-manage_folders_btn.pack(pady=5)
 
+# Stream preview video button
 stream_preview_btn = tk.Button(root, text="Stream Preview Video", width=20, state=tk.DISABLED, command=stream_video_preview)
 stream_preview_btn.pack(pady=5)
 
