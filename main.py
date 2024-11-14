@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk, font
 import paramiko
 from paramiko.ssh_exception import SSHException
 import os
@@ -264,7 +264,7 @@ def delete_file_or_folder():
         # Default remote directory path
         default_path = f"/projects/bddu/data_setup/data"
         Thread(target=display_directories, args = (default_path,)).start()
-
+        
         # Ask the user for the path of the file/folder to be deleted    
         paths_string = simpledialog.askstring("Remote Path", f"Enter the remote path of the file/folder to delete. If more than one file/folder, seperate the paths by commas(e.g., test.mp4, test):")
 
@@ -619,7 +619,7 @@ def stream_video_preview():
             os.remove(local_temp_path)
 
     except Exception as e:
-        # messagebox.showerror("Preview Error", str(e))
+        # messagebox.showerror("Preview Error", "Invalid video input")
         print("Preview Error", str(e))
     finally:
         # Cleanup remote file in case of any error
@@ -632,47 +632,52 @@ root = tk.Tk()
 root.title("Delta HPC File Manager")
 
 # Set the window size
-root.geometry("700x600")
+root.geometry("750x700")
+
+font_txt = ("TkDefaultFont", 11)
+default_font = font.nametofont("TkDefaultFont")
+default_font.configure(size=10)
 
 # Username label and entry
-username_label = tk.Label(root, text="Username:")
+username_label = tk.Label(root, text="Username:", font=font_txt)
 username_label.pack(pady=5)
-username_entry = tk.Entry(root, width=40)
+username_entry = tk.Entry(root, width=40, font=("TkDefaultFont", 10))
 username_entry.pack(pady=5)
 
 # Password label and entry
-password_label = tk.Label(root, text="Password:")
+password_label = tk.Label(root, text="Password:", font=font_txt)
 password_label.pack(pady=5)
-password_entry = tk.Entry(root, show="*", width=40)
+password_entry = tk.Entry(root, show="*", width=40, font=("TkDefaultFont", 10))
 password_entry.pack(pady=5)
 
+
 # Connect button
-connect_btn = tk.Button(root, text="Connect", width=20, command=connect_to_server)
+connect_btn = tk.Button(root, text="Connect", width=20, command=connect_to_server, font=font_txt)
 connect_btn.pack(pady=10)
 
 # Manage Folders button
-manage_folders_btn = tk.Button(root, text="List Directory Contents", width=20, state=tk.DISABLED, command=manage_folders)
+manage_folders_btn = tk.Button(root, text="List Directory Contents", width=20, state=tk.DISABLED, command=manage_folders, font=font_txt)
 manage_folders_btn.pack(pady=5)
 
 # Upload button
-upload_btn = tk.Button(root, text="Upload File(s)", width=20, state=tk.DISABLED, command=upload_file)
+upload_btn = tk.Button(root, text="Upload File(s)", width=20, state=tk.DISABLED, command=upload_file, font=font_txt)
 upload_btn.pack(pady=5)
 
 # Download button
-download_btn = tk.Button(root, text="Download File(s)", width=20, state=tk.DISABLED, command=download_file)
+download_btn = tk.Button(root, text="Download File(s)", width=20, state=tk.DISABLED, command=download_file, font=font_txt)
 download_btn.pack(pady=5)
 
 # Delete button
-delete_btn = tk.Button(root, text="Delete File(s)/Folder(s)", width=20, state=tk.DISABLED, command=delete_file_or_folder)
+delete_btn = tk.Button(root, text="Delete File(s)/Folder(s)", width=20, state=tk.DISABLED, command=delete_file_or_folder, font=font_txt)
 delete_btn.pack(pady=5)
 
 
 # Stream preview video button
-stream_preview_btn = tk.Button(root, text="Stream Preview Video", width=20, state=tk.DISABLED, command=stream_video_preview)
+stream_preview_btn = tk.Button(root, text="Stream Preview Video", width=20, state=tk.DISABLED, command=stream_video_preview, font=font_txt)
 stream_preview_btn.pack(pady=5)
 
 # Disconnect button
-disconnect_btn = tk.Button(root, text="Disconnect", width=20, state=tk.DISABLED, command=disconnect_from_server)
+disconnect_btn = tk.Button(root, text="Disconnect", width=20, state=tk.DISABLED, command=disconnect_from_server, font=font_txt)
 disconnect_btn.pack(pady=10)
 
 # Progress bar
@@ -681,11 +686,11 @@ progress_bar = ttk.Progressbar(root, variable=progress_var, maximum=100, length=
 progress_bar.pack(pady=10)
 
 # Percentage label
-percentage_label = tk.Label(root, text="0%")
+percentage_label = tk.Label(root, text="0%", font=font_txt)
 percentage_label.pack(pady=5)
 
 # Directory display
-directory_display = tk.Text(root, height=15, width=80, state=tk.DISABLED)
+directory_display = tk.Text(root, height=15, width=80, state=tk.DISABLED, font=font_txt)
 directory_display.pack(pady=10)
 
 # Start the GUI event loop
