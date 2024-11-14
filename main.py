@@ -3,7 +3,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 import paramiko
 from paramiko.ssh_exception import SSHException
 import os
-from threading import Thread
+from threading import Thread, Lock
 from stat import S_ISDIR
 import time
 import cv2
@@ -16,13 +16,13 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QPu
 from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtCore import QTimer, Qt
 
-
 # Global variables to hold the SSH client, SFTP session, and transport
 client = None
 sftp = None
 transport = None
 username = ""
 local_temp_path = None
+socket_lock = Lock()
 
 def duo_authentication_handler(title, instructions, fields):
     responses = []
@@ -87,17 +87,13 @@ def upload_file():
             messagebox.showerror("Upload Error", "Not connected to the server.")
             return
 
+        default_path = f"/projects/bddu/data_setup/data"
+        Thread(target=display_directories, args = (default_path,)).start()
+
         # Open a file dialog to select a file
-        file_path = filedialog.askopenfilename()
-        if file_path:
-            # Check if the file exists locally
-            if not os.path.isfile(file_path):
-                messagebox.showerror("Upload Error", "The selected file does not exist.")
-                return
-
+        file_paths = filedialog.askopenfilename(multiple = True)
+        if file_paths: 
             # Default remote directory path
-            default_path = f"/projects/bddu/data_setup/data"
-
             # Ask the user for a subdirectory where the file will be uploaded, appended to the default path
             subdir = simpledialog.askstring("Upload Directory", f"Enter the subdirectory path (relative to {default_path}):")
             if subdir:
@@ -108,33 +104,47 @@ def upload_file():
             # Ensure the directory exists, create it if it doesn't
             make_remote_dir(remote_dir)
 
-            # Define the remote path where the file will be uploaded
-            remote_path = posixpath.join(remote_dir, os.path.basename(file_path))
+        threads = []
+        for file in file_paths: 
+            if file:
+                file_name = file.split('/')[-1]
+                # Check if the file exists locally
+                if not os.path.isfile(file):
+                    messagebox.showerror("Upload Error", f"The selected file \"{file_name}\" does not exist.")
+                    continue
+                
+                # Define the remote path where the file will be uploaded
+                remote_path = posixpath.join(remote_dir, os.path.basename(file))
 
-            # Check if the file already exists on the server
-            try:
-                sftp.stat(remote_path)  # Check if the remote file exists
-                # If the file exists, prompt the user for confirmation to overwrite
-                overwrite = messagebox.askyesno("File Exists", "The file already exists on the server. Do you want to overwrite it?")
-                if not overwrite:
-                    return  # Cancel the upload if the user doesn't want to overwrite
-            except FileNotFoundError:
-                # If the file doesn't exist, proceed with the upload
-                pass
+                # Check if the file already exists on the server
+                try:
+                    sftp.stat(remote_path)  # Check if the remote file exists
+                    # If the file exists, prompt the user for confirmation to overwrite
+                    overwrite = messagebox.askyesno("File Exists", f"The file \"{file_name}\" already exists on the server. Do you want to overwrite it?")
+                    if not overwrite:
+                        continue  # Cancel the upload if the user doesn't want to overwrite
+                except FileNotFoundError:
+                    # If the file doesn't exist, proceed with the upload
+                    pass
 
-            # Get file size for progress tracking
-            file_size = os.path.getsize(file_path)
+                # Get file size for progress tracking
+                file_size = os.path.getsize(file)
 
-            # Initialize the progress bar and percentage label
-            progress_var.set(0)
-            percentage_label.config(text="0%")
+                # Initialize the progress bar and percentage label
+                progress_var.set(0)
+                percentage_label.config(text="0%")
 
-            # Start upload in a separate thread to avoid blocking the GUI
-            Thread(target=upload_file_thread, args=(file_path, remote_path, file_size)).start()
+                # Start upload in a separate thread to avoid blocking the GUI
+                thread = Thread(target=upload_file_thread, args=(file, remote_path, file_size))
+                disable_buttons()
+                thread.start()
+                threads.append(thread)
+                
+        if threads:
+            check_threads(threads, "Upload")                
 
     except Exception as e:
         messagebox.showerror("Upload Error", str(e))
-
 
 def make_remote_dir(remote_dir):
     """Helper function to create a remote directory if it doesn't exist."""
@@ -149,20 +159,34 @@ def make_remote_dir(remote_dir):
                 sftp.mkdir(path)
 
 def upload_file_thread(file_path, remote_path, file_size):
-    try:
-        def progress_callback(transferred, total):
-            # Calculate the progress percentage
-            progress = (transferred / file_size) * 100
-            # Update the progress on the main thread
-            root.after(0, update_progress_bar, progress)
+    with socket_lock:
+        try:
+            def progress_callback(transferred, total):
+                # Calculate the progress percentage
+                progress = (transferred / file_size) * 100
+                # Update the progress on the main thread
+                root.after(0, update_progress_bar, progress)
 
-        with open(file_path, 'rb') as file_handle:
-            sftp.putfo(file_handle, remote_path, callback=progress_callback)
-        messagebox.showinfo("Upload", f"Successfully uploaded {os.path.basename(file_path)}")
-        # Reset progress bar and percentage label
-        root.after(0, update_progress_bar, 0)
-    except Exception as e:
-        messagebox.showerror("Upload Error", str(e))
+            with open(file_path, 'rb') as file_handle:
+                sftp.putfo(file_handle, remote_path, callback=progress_callback)
+            # Reset progress bar and percentage label
+            root.after(0, update_progress_bar, 0)
+        
+        except Exception as e:
+            root.after(0, messagebox.showerror, "Upload Error", str(e))
+
+def check_threads(threads, action):
+    alive_threads = []
+    for thread in threads:
+        if thread.is_alive():
+            alive_threads.append(thread)
+
+    if alive_threads:
+        # If the thread is still running, check again after 100ms
+        root.after(100, check_threads, alive_threads, action)
+    else:
+        root.after(0, messagebox.showinfo, action, f"File(s) successfully {action.lower()}ed")
+        enable_buttons()
 
 def download_file():
     global sftp
@@ -171,52 +195,63 @@ def download_file():
         if sftp is None:
             messagebox.showerror("Download Error", "Not connected to the server.")
             return
+
         default_path = f"/projects/bddu/data_setup/data"
+        Thread(target=display_directories, args = (default_path,)).start()
+
         # Ask the user for the remote path of the file to be downloaded
-        remote_file = simpledialog.askstring("Remote Path", f"Enter the remote path of the file to download (relative to {default_path}):")
+        file_string = simpledialog.askstring("Remote Path", f"Enter the remote path of the file to download. If more than one file, seperate the paths by commas(e.g., test.mp4, test1.mp4):")
         
-        
-            
-            
-            
-        if remote_file:
-            remote_path = posixpath.join(default_path, remote_file)
-            # Check if the remote file exists
-            try:
-                file_size = sftp.stat(remote_path).st_size
-            except FileNotFoundError:
-                messagebox.showerror("Download Error", "The remote file does not exist.")
-                return
+        remote_files = []
+        if file_string:
+            remote_files = file_string.split(", ")
 
-            # Open a file dialog to select a save location
-            file_path = filedialog.asksaveasfilename(initialfile=os.path.basename(remote_path))
-            if file_path:
-                # Initialize the progress bar and percentage label
-                progress_var.set(0)
-                percentage_label.config(text="0%")
+        threads = []
+        for remote_file in remote_files:
+            if remote_file:
+                remote_path = posixpath.join(default_path, remote_file)
+                # Check if the remote file exists
+                try:
+                    file_size = sftp.stat(remote_path).st_size
+                except FileNotFoundError:
+                    messagebox.showerror("Download Error", f"The remote file \"{remote_file}\" does not exist.")
+                    continue
 
-                # Start download in a separate thread to avoid blocking the GUI
-                Thread(target=download_file_thread, args=(remote_path, file_path, file_size)).start()
+                # Open a file dialog to select a save location
+                file_path = filedialog.asksaveasfilename(initialfile=os.path.basename(remote_path))
+                if file_path:
+                    # Initialize the progress bar and percentage label
+                    progress_var.set(0)
+                    percentage_label.config(text="0%")
+
+                    # Start download in a separate thread to avoid blocking the GUI
+                    thread = Thread(target=download_file_thread, args=(remote_path, file_path, file_size))
+                    disable_buttons()
+                    thread.start()
+                    threads.append(thread)
+                    
+        if threads:
+            check_threads(threads, "Download")   
 
     except Exception as e:
         messagebox.showerror("Download Error", str(e))
 
 def download_file_thread(remote_path, file_path, file_size):
-    try:
-        def progress_callback(transferred, total):
-            # Calculate the progress percentage
-            progress = (transferred / total) * 100
-            # Update the progress on the main thread
-            root.after(0, update_progress_bar, progress)
+    with socket_lock:
+        try:
+            def progress_callback(transferred, total):
+                # Calculate the progress percentage
+                progress = (transferred / total) * 100
+                # Update the progress on the main thread
+                root.after(0, update_progress_bar, progress)
 
-        # Download the file
-        with open(file_path, 'wb') as file_handle:
-            sftp.getfo(remote_path, file_handle, callback=progress_callback)
-        messagebox.showinfo("Download", f"Successfully downloaded {os.path.basename(file_path)}")
-        # Reset progress bar and percentage label
-        root.after(0, update_progress_bar, 0)
-    except Exception as e:
-        messagebox.showerror("Download Error", str(e))
+            # Download the file
+            with open(file_path, 'wb') as file_handle:
+                sftp.getfo(remote_path, file_handle, callback=progress_callback)
+            # Reset progress bar and percentage label
+            root.after(0, update_progress_bar, 0)
+        except Exception as e:
+            messagebox.showerror("Download Error", str(e))
 
 def delete_file_or_folder():
     global sftp
@@ -228,32 +263,40 @@ def delete_file_or_folder():
 
         # Default remote directory path
         default_path = f"/projects/bddu/data_setup/data"
-        
-        # Ask the user for the path of the file/folder to be deleted
-        path_to_delete = simpledialog.askstring("Delete Path", f"Enter the remote path of the file/folder to delete (relative to {default_path}):")
-        
-        if path_to_delete:
-            remote_path = posixpath.join(default_path, path_to_delete)
+        Thread(target=display_directories, args = (default_path,)).start()
 
-            # Check if the remote path exists
-            try:
-                file_stat = sftp.stat(remote_path)
-            except FileNotFoundError:
-                messagebox.showerror("Deletion Error", "The specified file or folder does not exist.")
-                return
+        # Ask the user for the path of the file/folder to be deleted    
+        paths_string = simpledialog.askstring("Remote Path", f"Enter the remote path of the file/folder to delete. If more than one file/folder, seperate the paths by commas(e.g., test.mp4, test):")
 
-            # Ask for user confirmation
-            confirm = messagebox.askyesno("Confirm Deletion", f"Are you sure you want to permanently delete '{remote_path}'?")
-            if not confirm:
-                return  # User canceled the deletion
+        paths_to_delete = []
+        if paths_string:
+            paths_to_delete = paths_string.split(", ")
 
-            # If it's a directory, delete it recursively
-            if S_ISDIR(file_stat.st_mode):
-                delete_directory_recursive(remote_path)
-            else:
-                sftp.remove(remote_path)  # If it's a file, delete it directly
+        for path_to_delete in paths_to_delete:
+            if path_to_delete:
+                remote_path = posixpath.join(default_path, path_to_delete)
 
-            messagebox.showinfo("Deletion Complete", f"Successfully deleted '{remote_path}'")
+                # Check if the remote path exists
+                try:
+                    file_stat = sftp.stat(remote_path)
+                except FileNotFoundError:
+                    messagebox.showerror("Deletion Error", f"The specified file or folder \"{path_to_delete}\"  does not exist.")
+                    continue
+
+                # Ask for user confirmation
+                confirm = messagebox.askyesno("Confirm Deletion", f"Are you sure you want to permanently delete '{remote_path}'?")
+                if not confirm:
+                    continue  # User canceled the deletion
+
+                # If it's a directory, delete it recursively
+                if S_ISDIR(file_stat.st_mode):
+                    delete_directory_recursive(remote_path)
+                else:
+                    sftp.remove(remote_path)  # If it's a file, delete it directly
+                
+                updated_directory = "/".join(remote_path.rsplit("/", 1)[:-1])
+                Thread(target=display_directories, args = (updated_directory,)).start()
+                messagebox.showinfo("Deletion Complete", f"Successfully deleted '{remote_path}'")
     
     except Exception as e:
         messagebox.showerror("Deletion Error", str(e))
@@ -370,27 +413,30 @@ def manage_folders():
             messagebox.showerror("Folder Management Error", "The specified directory does not exist.")
             return
 
-        # List directory contents
-        folder_contents = sftp.listdir_attr(remote_dir)
-        
-        # Clear the display area before showing updated directory contents
-        directory_display.config(state=tk.NORMAL)
-        directory_display.delete(1.0, tk.END)
-        directory_display.insert(tk.END, f"Contents of {remote_dir}:\n\n")
-        
-        for item in folder_contents:
-            item_name = item.filename
-            item_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(item.st_mtime))
-            item_size = f"{item.st_size} bytes"
-            if S_ISDIR(item.st_mode):
-                directory_display.insert(tk.END, f"[DIR]  {item_name}\t\n")
-            else:
-                directory_display.insert(tk.END, f"[FILE] {item_name}\t\n")
-        
-        directory_display.config(state=tk.DISABLED)
+        display_directories(remote_dir)
 
     except Exception as e:
         messagebox.showerror("Folder Management Error", str(e))
+
+def display_directories(remote_dir):
+    # List directory contents
+    folder_contents = sftp.listdir_attr(remote_dir)
+    
+    # Clear the display area before showing updated directory contents
+    directory_display.config(state=tk.NORMAL)
+    directory_display.delete(1.0, tk.END)
+    directory_display.insert(tk.END, f"Contents of {remote_dir}:\n\n")
+    
+    for item in folder_contents:
+        item_name = item.filename
+        item_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(item.st_mtime))
+        item_size = f"{item.st_size} bytes"
+        if S_ISDIR(item.st_mode):
+            directory_display.insert(tk.END, f"[DIR]  {item_name}\t\n")
+        else:
+            directory_display.insert(tk.END, f"[FILE] {item_name}\t\n")
+    
+    directory_display.config(state=tk.DISABLED)
 
 def disconnect_from_server():
     global client, sftp, transport
@@ -430,9 +476,6 @@ def disable_buttons():
     manage_folders_btn.config(state=tk.DISABLED)
     disconnect_btn.config(state=tk.DISABLED)
     stream_preview_btn.config(state=tk.DISABLED)
-
-
-
 
 class VideoPlayer(QMainWindow):
     def __init__(self, video_source):
@@ -512,8 +555,6 @@ def cleanup(local_temp_path, remote_temp_path, client):
         
     except Exception as e:
         print(f"Error during cleanup: {e}")
-
-
 
 def stream_video_preview():
     global sftp, client
@@ -609,22 +650,24 @@ password_entry.pack(pady=5)
 connect_btn = tk.Button(root, text="Connect", width=20, command=connect_to_server)
 connect_btn.pack(pady=10)
 
-# Upload button
-upload_btn = tk.Button(root, text="Upload File", width=20, state=tk.DISABLED, command=upload_file)
-upload_btn.pack(pady=5)
-
-# Download button
-download_btn = tk.Button(root, text="Download File", width=20, state=tk.DISABLED, command=download_file)
-download_btn.pack(pady=5)
-
-# Delete button
-delete_btn = tk.Button(root, text="Delete File/Folder", width=20, state=tk.DISABLED, command=delete_file_or_folder)
-delete_btn.pack(pady=5)
-
 # Manage Folders button
 manage_folders_btn = tk.Button(root, text="List Directory Contents", width=20, state=tk.DISABLED, command=manage_folders)
 manage_folders_btn.pack(pady=5)
 
+# Upload button
+upload_btn = tk.Button(root, text="Upload File(s)", width=20, state=tk.DISABLED, command=upload_file)
+upload_btn.pack(pady=5)
+
+# Download button
+download_btn = tk.Button(root, text="Download File(s)", width=20, state=tk.DISABLED, command=download_file)
+download_btn.pack(pady=5)
+
+# Delete button
+delete_btn = tk.Button(root, text="Delete File(s)/Folder(s)", width=20, state=tk.DISABLED, command=delete_file_or_folder)
+delete_btn.pack(pady=5)
+
+
+# Stream preview video button
 stream_preview_btn = tk.Button(root, text="Stream Preview Video", width=20, state=tk.DISABLED, command=stream_video_preview)
 stream_preview_btn.pack(pady=5)
 
@@ -644,7 +687,6 @@ percentage_label.pack(pady=5)
 # Directory display
 directory_display = tk.Text(root, height=15, width=80, state=tk.DISABLED)
 directory_display.pack(pady=10)
-
 
 # Start the GUI event loop
 root.mainloop()
