@@ -771,11 +771,11 @@ upload_btn = tk.Button(root, text="Upload File(s)", width=20, state=tk.DISABLED,
 upload_btn.pack(pady=5)
 
 # Download button
-download_btn = tk.Button(root, text="Download File(s)", width=20, state=tk.DISABLED, command=download_file, font=font_txt)
+download_btn = tk.Button(root, text="Download File", width=20, state=tk.DISABLED, command=download_file, font=font_txt)
 download_btn.pack(pady=5)
 
 # Delete button
-delete_btn = tk.Button(root, text="Delete File(s)/Folder(s)", width=20, state=tk.DISABLED, command=delete_file_or_folder, font=font_txt)
+delete_btn = tk.Button(root, text="Delete File/Folder", width=20, state=tk.DISABLED, command=delete_file_or_folder, font=font_txt)
 delete_btn.pack(pady=5)
 
 
