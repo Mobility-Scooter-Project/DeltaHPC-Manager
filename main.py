@@ -96,13 +96,15 @@ def upload_file():
         if file_paths: 
             # Ask the user for a subdirectory where the file will be uploaded, appended to the default path
             subdir = open_popup(default_path, "Upload Directory", "Upload", "Select the subdirectory path (root)")
-            if subdir:
+            if subdir == "Cancelled":
+                return
+            elif subdir:
                 remote_dir = posixpath.join(default_path, subdir)
             else:
                 remote_dir = default_path
 
             # Ensure the directory exists, create it if it doesn't
-            make_remote_dir(remote_dir)
+            make_remote_dir(remote_dir) 
 
         threads = []
         for file in file_paths: 
@@ -141,7 +143,7 @@ def upload_file():
                 threads.append(thread)
 
         if threads:
-            check_threads(threads, "Upload")                
+            check_threads(threads, "Upload", remote_dir)                
 
     except Exception as e:
         messagebox.showerror("Upload Error", str(e))
@@ -175,7 +177,7 @@ def upload_file_thread(file_path, remote_path, file_size):
         except Exception as e:
             root.after(0, messagebox.showerror, "Upload Error", str(e))
 
-def check_threads(threads, action):
+def check_threads(threads, action, remote_dir):
     alive_threads = []
     for thread in threads:
         if thread.is_alive():
@@ -183,9 +185,10 @@ def check_threads(threads, action):
 
     if alive_threads:
         # If the thread is still running, check again after 100ms
-        root.after(100, check_threads, alive_threads, action)
+        root.after(100, check_threads, alive_threads, action, remote_dir)
     else:
         root.after(0, messagebox.showinfo, action, f"File(s) successfully {action.lower()}ed")
+        display_directories(remote_dir)
         enable_buttons()
 
 def open_popup(default_path, title, feature, text):
@@ -231,13 +234,13 @@ def open_popup(default_path, title, feature, text):
             if option == "Open" and is_directory(remote_path):
                 # Display error if the user tries to open a file
                 file_name = open_popup(remote_path, title, feature, f"Select the remote path of the file to {feature.lower()} ({path_name}): ")
-                if file_name or feature == "Display":
+                if file_name and file_name != "Cancelled":
                     selected_file += f"/{file_name}"   
-                else:
-                    selected_file = ""
+                elif file_name:
+                    selected_file = "Cancelled"
             elif option == "Open":
                 messagebox.showerror("Open Error", f"Cannot open the file '{selected_file}'")
-                selected_file = ""
+                selected_file = "" 
             
             if option == "View":
                 stream_video_preview(selected_file)
@@ -249,6 +252,13 @@ def open_popup(default_path, title, feature, text):
         nonlocal selected_file
         top.destroy()
         selected_file = simpledialog.askstring("New Subdirectory", f"Enter the subdirectory name ({default_path}):")
+        if not selected_file:
+            selected_file = "Cancelled"
+
+    def cancel_popup():
+        nonlocal selected_file
+        top.destroy()
+        selected_file = "Cancelled"
 
     # Add an intruction text for the popup
     tk.Label(top, text=text, font=("TkDefaultFont")).place(x=10, y=10)
@@ -261,7 +271,7 @@ def open_popup(default_path, title, feature, text):
     tk.Button(top, text=feature, command=lambda: get_selection(feature)).place(x=20, y=65)
 
     # A button for canceling the popup
-    tk.Button(top, text="Cancel", command=top.destroy).place(x=190, y=65)
+    tk.Button(top, text="Cancel", command=cancel_popup).place(x=190, y=65)
         
     # A button for opening a subdirectory 
     open_btn = tk.Button(top, text="Open", command=lambda: get_selection("Open"))
@@ -272,7 +282,7 @@ def open_popup(default_path, title, feature, text):
         tk.Button(top, text="Create a new subdirectory", command=lambda: create_subdirectory()).place(x=300, y=65)
     
     if feature == "Download":
-        tk.Button(top, text="Preview", command=lambda: get_selection("View")).place(x=300, y=65)
+        tk.Button(top, text="Preview Video", command=lambda: get_selection("View")).place(x=300, y=65)
 
     # If there is no subdirectories, disable the open button
     if num_folder == 0:
@@ -294,6 +304,9 @@ def download_file():
 
         # Ask the user for the remote path of the file to be downloaded         
         file_string = open_popup(default_path, "Remote Path", "Download", f"Select the remote path of the file to download (root):")
+        if file_string == "Cancelled":
+            return
+
         remote_files = []
         if file_string:
             remote_files = file_string.split(", ")
@@ -320,7 +333,7 @@ def download_file():
 
                                        
         if threads:
-            check_threads(threads, "Download")   
+            check_threads(threads, "Download", default_path)   
 
     except Exception as e:
         messagebox.showerror("Download Error", str(e))
@@ -356,6 +369,8 @@ def delete_file_or_folder():
         
         # Ask the user for the path of the file/folder to be deleted    
         paths_string = open_popup(default_path, "Remote Path", "Delete", f"Select the remote path of the file to delete (root)")
+        if paths_string == "Cancelled":
+            return
 
         paths_to_delete = []
         if paths_string:
@@ -485,7 +500,9 @@ def manage_folders():
         
         # Ask the user for the subdirectory to manage, appende  d to the default path
         subdir = open_popup(default_path, "Remote Directory", "Display", "Select the subdirectory path (root)")
-        if subdir:
+        if subdir == "Cancelled":
+            return
+        elif subdir:
             remote_dir = posixpath.join(default_path, subdir)
         else:
             remote_dir = default_path
@@ -659,6 +676,9 @@ def stream_video_preview(remote_file):
         if not remote_file: 
             remote_file = open_popup(default_path, "Video Preview", "Preview", "Select the remote path of video to preview (root)")
         
+        if remote_file == "Cancelled":
+            return 
+
         if remote_file:
             if '.mp4' in remote_file:
                 # Define the path for the temporary file on the server
