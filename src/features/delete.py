@@ -5,7 +5,6 @@ import posixpath
 
 import connection
 import components.menu
-import utils.progress_bar_utils
 import features.display
 import utils.directory_utils
 
