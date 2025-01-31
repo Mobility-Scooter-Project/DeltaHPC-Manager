@@ -58,7 +58,7 @@ def open_popup(root, default_path, title, feature, text):
                 selected_file = "" 
             
             if option == "View":
-                features.preview.stream_video_preview(selected_file)
+                features.preview.stream_video_preview(root, selected_file)
                 selected_file = ""
         else:
             top.destroy()
